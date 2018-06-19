@@ -87,7 +87,7 @@ namespace OpenZWave
 		 * \return the number of bytes of data in the stream.
 		 * \see Get, GetDataSize
 		 */
-		uint32 GetDataSize()const{ return m_dataSize; }
+		uint32 GetDataSize()const{ return (m_error)? -1 : m_dataSize; }
 
  		/**
 		 * Empties the stream bytes held in the buffer.  
@@ -95,6 +95,20 @@ namespace OpenZWave
 		 * to the controller.
 		 */
 		void Purge();
+
+		/**
+		 * Sets a flag that indicates a error
+		 * This is used to indicate a error at the other end of the Stream so we can propogate
+		 * errors up the stack.
+		 */
+		void SetError(bool value = true);
+
+		/**
+		 * Tests if a error has been set
+		 * This is used to indicate a error at the other end of the Stream so we can propogate
+		 * errors up the stack.
+		 */
+		bool HasError() const{ return m_error; }
 
 	protected:
 		/**
@@ -127,6 +141,7 @@ namespace OpenZWave
 		uint32	m_head;
 		uint32	m_tail;
  		Mutex*	m_mutex;
+		bool    m_error;
 	};
 
 } // namespace OpenZWave

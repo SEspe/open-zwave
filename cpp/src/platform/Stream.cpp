@@ -48,7 +48,8 @@ Stream::Stream
 	m_dataSize(0),
 	m_head(0),
 	m_tail(0),
-	m_mutex( new Mutex() )
+	m_mutex( new Mutex() ),
+	m_error(false)
 {
 	m_buffer = new uint8[m_bufferSize];
 	memset(m_buffer, 0x00, m_bufferSize);
@@ -93,6 +94,10 @@ bool Stream::Get
 	uint32 _size
 )
 {
+	if( m_error )
+	{
+		return false;
+	}
 	if( m_dataSize < _size )
 	{
 		// There is not enough data in the buffer to fulfill the request
@@ -190,6 +195,23 @@ void Stream::Purge
 }
 
 //-----------------------------------------------------------------------------
+//     <Stream::SetError>
+//     Test whether there is enough data to be signalled
+//-----------------------------------------------------------------------------
+void Stream::SetError
+(
+    bool value
+)
+{
+	m_error = value;
+    Purge();
+	if( IsSignalled() )
+	{
+		Notify();
+	}
+}
+
+//-----------------------------------------------------------------------------
 //	<Stream::IsSignalled>
 //	Test whether there is enough data to be signalled
 //-----------------------------------------------------------------------------
@@ -197,7 +219,7 @@ bool Stream::IsSignalled
 (
 )
 {
-	return( m_dataSize >= m_signalSize );
+	return( m_error || m_dataSize >= m_signalSize );
 }
 
 //-----------------------------------------------------------------------------

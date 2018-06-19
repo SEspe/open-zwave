@@ -87,6 +87,11 @@ namespace OpenZWave
 			ControllerInterface_Hid
 		};
 
+        /*
+         * Test if the Driver has a encountered an error and should bail out.
+         */
+        bool HasError() const { return m_error; }
+
 	//-----------------------------------------------------------------------------
 	// Construction / Destruction
 	//-----------------------------------------------------------------------------
@@ -152,6 +157,7 @@ namespace OpenZWave
 		Thread*					m_driverThread;			/**< Thread for reading from the Z-Wave controller, and for creating and managing the other threads for sending, polling etc. */
 		Mutex*					m_initMutex;            /**< Mutex to ensure proper ordering of initialization/deinitialization */
 		bool					m_exit;					/**< Flag that is set when the application is exiting. */
+        bool					m_error; 				/**< Flag indicating that there is a error and we should bail out of the Driver */
 		bool					m_init;					/**< Set to true once the driver has been initialised */
 		bool					m_awakeNodesQueried;	/**< Set to true once the driver has polled all awake nodes */
 		bool					m_allNodesQueried;		/**< Set to true once the driver has polled all nodes */

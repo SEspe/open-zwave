@@ -137,7 +137,7 @@ void SerialControllerImpl::ReadThreadProc
 (
 	Event* _exitEvent
 )
-{  
+{
 	uint32 attempts = 0;
 	while( !_exitEvent->IsSignalled() )
 	{
@@ -199,13 +199,13 @@ bool SerialControllerImpl::Init
 	if( -1 == m_hSerialController )
 	{
 		//Error
-		Log::Write( LogLevel_Error, "ERROR: Cannot open serial port %s. Error code %d", device.c_str(), errno );
+		Log::Write( LogLevel_Error, "ERROR: Cannot open serial port %s. Error %s (%d)", device.c_str(), strerror(errno), errno );
 		goto SerialOpenFailure;
 	}
 
 	if( flock( m_hSerialController, LOCK_EX | LOCK_NB) == -1 )
 	{
-		Log::Write( LogLevel_Error, "ERROR: Cannot get exclusive lock for serial port %s. Error code %d", device.c_str(), errno );
+		Log::Write( LogLevel_Error, "ERROR: Cannot get exclusive lock for serial port %s. Error %s (%d)", device.c_str(), strerror(errno), errno );
 	}
 
 	int bits;
@@ -288,20 +288,21 @@ bool SerialControllerImpl::Init
 			cfsetspeed( &tios, B230400 );
 			break;
 		default:
-			Log::Write( LogLevel_Error, "Baud rate not supported" );
+			Log::Write( LogLevel_Error, "Baud rate (%d) not supported", m_owner->m_baud );
 			goto SerialOpenFailure;
 	}
 	if ( tcsetattr( m_hSerialController, TCSANOW, &tios ) == -1 )
 	{
 		// Error.  Clean up and exit
-		Log::Write( LogLevel_Error, "ERROR: Failed to set serial port parameters" );
+		Log::Write( LogLevel_Error, "ERROR: Failed to set serial port parameters: Error %s (%d)", strerror(errno), errno );
 		goto SerialOpenFailure;
 	}
 
 	tcflush( m_hSerialController, TCIOFLUSH );
 
 	// Open successful
- 	Log::Write( LogLevel_Info, "Serial port %s opened (attempt %d)", device.c_str(), _attempts );
+	Log::Write( LogLevel_Info, "Serial port %s opened (attempt %d)", device.c_str(), _attempts );
+	m_owner->SetError(false);
 	return true;
 
 SerialOpenFailure:
@@ -323,37 +324,50 @@ void SerialControllerImpl::Read
     Event* _exitEvent
 )
 {
-	uint8 buffer[256];
+    uint8 buffer[256];
+    int err;
 
 	while( !_exitEvent->IsSignalled() )
         {
-		int32 bytesRead;
-		int err;
+        struct timeval *whenp;
+        fd_set rds, eds;
+        int oldstate;
+        int32 bytesRead;
 
-		do
-		{
-			bytesRead = read( m_hSerialController, buffer, sizeof(buffer) );
-			if( bytesRead > 0 )
-				m_owner->Put( buffer, bytesRead );
-		} while( bytesRead > 0 );
+        FD_ZERO( &rds );
+        FD_SET( m_hSerialController, &rds );
+        FD_ZERO( &eds );
+        FD_SET( m_hSerialController, &eds );
+        whenp = NULL;
 
-		do
-		{
-			struct timeval *whenp;
-			fd_set rds, eds;
-			int oldstate;
-
-			FD_ZERO( &rds );
-			FD_SET( m_hSerialController, &rds );
-			FD_ZERO( &eds );
-			FD_SET( m_hSerialController, &eds );
-			whenp = NULL;
-
-			pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, &oldstate);
-			err = select( m_hSerialController + 1, &rds, NULL, &eds, whenp );
-			pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &oldstate);
-		} while( err <= 0 );
-	}
+        pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, &oldstate);
+        err = select( m_hSerialController + 1, &rds, NULL, &eds, whenp );
+        pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &oldstate);
+        if (FD_ISSET(m_hSerialController, &eds)) {
+            Log::Write( LogLevel_Error, "Error Selecting on Serial Port: %s (Code %d)", strerror(errno), errno);
+            return;
+        }
+        if (err < 0) {
+            Log::Write( LogLevel_Error, "Error on Select: %s (Code %d)", strerror(errno), errno);
+            return;
+        }
+        if (FD_ISSET(m_hSerialController, &rds)) {
+            bytesRead = read( m_hSerialController, buffer, sizeof(buffer) );
+            /* EOF */
+            if (bytesRead <= 0) {
+                if (errno == EAGAIN)
+                    continue;
+                if (errno == EWOULDBLOCK)
+                    continue;
+                /* else there is a error */
+                Log::Write( LogLevel_Error, "Reading Serial Port: EOF (Code %d Return %d)", errno, bytesRead);
+                m_owner->SetError();
+                return;
+            }
+            if( bytesRead > 0 )
+                m_owner->Put( buffer, bytesRead );
+        }
+    }
 }
 
 //-----------------------------------------------------------------------------

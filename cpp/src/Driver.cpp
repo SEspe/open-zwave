@@ -145,6 +145,7 @@ Driver::Driver
 m_driverThread( new Thread( "driver" ) ),
 m_initMutex(new Mutex()),
 m_exit( false ),
+m_error( false ),
 m_init( false ),
 m_awakeNodesQueried( false ),
 m_allNodesQueried( false ),
@@ -484,7 +485,10 @@ void Driver::DriverThreadProc
 					case 2:
 					{
 						// Data has been received
-						ReadMsg();
+						if( !ReadMsg() )
+						{
+							goto bailout;
+						}
 						break;
 					}
 					default:
@@ -499,7 +503,7 @@ void Driver::DriverThreadProc
 				}
 			}
 		}
-
+bailout:
 		++attempts;
 
 		uint32 maxAttempts = 0;
@@ -1038,16 +1042,25 @@ bool Driver::WriteNextMsg
 		MsgQueue const _queue
 )
 {
+	m_sendMutex->Lock();
+
+	if( 0 == m_msgQueue[_queue].size() )
+	{
+		m_sendMutex->Unlock();
+		return false;
+	}
 
 	// There are messages to send, so get the one at the front of the queue
-	m_sendMutex->Lock();
 	MsgQueueItem item = m_msgQueue[_queue].front();
+
+	m_sendMutex->Unlock();
 
 	if( MsgQueueCmd_SendMsg == item.m_command )
 	{
 		// Send a message
 		m_currentMsg = item.m_msg;
 		m_currentMsgQueueSource = _queue;
+		m_sendMutex->Lock();
 		m_msgQueue[_queue].pop_front();
 		if( m_msgQueue[_queue].empty() )
 		{
@@ -1071,6 +1084,7 @@ bool Driver::WriteNextMsg
 		// Move to the next query stage
 		m_currentMsg = NULL;
 		Node::QueryStage stage = item.m_queryStage;
+		m_sendMutex->Lock();
 		m_msgQueue[_queue].pop_front();
 		if( m_msgQueue[_queue].empty() )
 		{
@@ -1095,7 +1109,6 @@ bool Driver::WriteNextMsg
 	{
 		// Run a multi-step controller command
 		m_currentControllerCommand = item.m_cci;
-		m_sendMutex->Unlock();
 		// Figure out if done with command
 		if ( m_currentControllerCommand->m_controllerCommandDone )
 		{
@@ -1652,6 +1665,16 @@ bool Driver::ReadMsg
 )
 {
 	uint8 buffer[1024] = {0};
+
+	if (m_controller->HasError())
+	{
+		Notification* notification = new Notification(Notification::Type_DriverFailed);
+		notification->SetHomeAndNodeIds(m_homeId, 0);
+		QueueNotification(notification);
+		NotifyWatchers();
+		m_error = true;
+		return false;
+	}
 
 	if( !m_controller->Read( buffer, 1 ) )
 	{
@@ -3779,13 +3802,13 @@ bool Driver::HandleApplicationUpdateRequest
                         if ( _data[3] != _data[6] )
                         {
                         	// Request the node protocol info (also removes any existing node and creates a new one)
-			        InitNode( nodeId );	
+			        InitNode( nodeId );
                         }
-                        else 
+                        else
                         {
                         	Log::Write(LogLevel_Info, nodeId, "Not Re-assigning NodeID as old and new NodeID match");
                         }
-			
+
 			break;
 		}
 		case UPDATE_STATE_ROUTING_PENDING:
